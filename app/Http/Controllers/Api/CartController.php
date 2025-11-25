@@ -8,32 +8,44 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Product;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 
 class CartController extends Controller
 {
     /**
-     * Tampilkan cart user saat ini (protected, user login).
+     * Tampilkan cart user saat ini
      */
     public function index()
     {
         $user = Auth::user();
-        $cart = Cart::active($user->id);  // Ambil cart aktif
+        
+        // Pastikan model Cart punya scopeActive atau pakai where manual
+        $cart = Cart::where('user_id', $user->id)->where('status', 'active')->first();
 
+        // FIX: Kalau cart kosong, balikan struktur JSON yang dimengerti Flutter
         if (!$cart) {
-            return response()->json(['data' => []]);  // Cart kosong
+            return response()->json([
+                'id' => 0,
+                'total' => 0,
+                'items' => [] // List kosong biar Flutter gak error looping
+            ], 200);
         }
 
-        $cart->load('items.product');  // Load items + product detail
-        $cart->total = $cart->items->sum(function ($item) {
+        $cart->load('items.product'); // Load relasi
+
+        // Hitung total on-the-fly biar akurat
+        $total = $cart->items->sum(function ($item) {
             return $item->quantity * $item->price;
         });
 
-        return response()->json($cart);
+        return response()->json([
+            'id' => $cart->id,
+            'total' => $total,
+            'items' => $cart->items
+        ]);
     }
 
     /**
-     * Tambah item ke cart (protected).
+     * Tambah item ke cart
      */
     public function store(Request $request)
     {
@@ -43,100 +55,98 @@ class CartController extends Controller
         ]);
 
         $user = Auth::user();
-        $cart = Cart::active($user->id);
-
-        if (!$cart) {
-            $cart = Cart::create([
-                'user_id' => $user->id,
-                'status' => 'active',
-            ]);
-        }
+        
+        // Cek atau buat cart baru
+        $cart = Cart::firstOrCreate(
+            ['user_id' => $user->id, 'status' => 'active'],
+            ['total' => 0] // Default value lain jika ada
+        );
 
         $product = Product::findOrFail($request->product_id);
 
-        // Cek stock
-        if ($product->stock < $request->quantity) {
-            abort(400, 'Stock tidak cukup.');
+        // Cek apakah item sudah ada di cart?
+        $existingItem = CartItem::where('cart_id', $cart->id)
+                                ->where('product_id', $product->id)
+                                ->first();
+
+        if ($existingItem) {
+            // FIX LOGIC: Kalau sudah ada, tambah quantity-nya (Increment)
+            // Cek stok dulu apakah cukup kalau ditambah
+            if ($product->stock < ($existingItem->quantity + $request->quantity)) {
+                return response()->json(['message' => 'Stock tidak cukup'], 400);
+            }
+
+            $existingItem->quantity += $request->quantity;
+            $existingItem->price = $product->price; // Update harga jika berubah
+            $existingItem->save();
+        } else {
+            // Kalau belum ada, buat baru
+            if ($product->stock < $request->quantity) {
+                return response()->json(['message' => 'Stock tidak cukup'], 400);
+            }
+
+            CartItem::create([
+                'cart_id' => $cart->id,
+                'product_id' => $product->id,
+                'quantity' => $request->quantity,
+                'price' => $product->price,
+            ]);
         }
 
-        // Update or create item
-        $item = CartItem::updateOrCreate(
-            ['cart_id' => $cart->id, 'product_id' => $product->id],
-            [
-                'quantity' => $request->quantity,
-                'price' => $product->price,  // Snapshot harga
-            ]
-        );
-
-        // Update total cart
-        $cart->total = $cart->items->sum(fn($i) => $i->quantity * $i->price);
-        $cart->save();
-
-        return response()->json($item, 201);
+        return response()->json(['message' => 'Berhasil masuk keranjang'], 201);
     }
 
     /**
-     * Update quantity item (protected).
+     * Update quantity item
      */
     public function update(Request $request, $id)
     {
-        $request->validate([
-            'quantity' => 'required|integer|min:1',
-        ]);
+        $request->validate(['quantity' => 'required|integer|min:1']);
 
-        $user = Auth::user();
-        $item = CartItem::where('id', $id)
-                        ->whereHas('cart', fn($q) => $q->where('user_id', $user->id))
-                        ->firstOrFail();
+        $item = CartItem::with('product')->find($id);
 
-        $product = $item->product;
-        if ($product->stock < $request->quantity) {
-            abort(400, 'Stock tidak cukup.');
+        if (!$item) {
+            return response()->json(['message' => 'Item not found'], 404);
+        }
+
+        // Cek stok
+        if ($item->product->stock < $request->quantity) {
+            return response()->json(['message' => 'Stock tidak cukup'], 400);
         }
 
         $item->quantity = $request->quantity;
         $item->save();
 
-        // Update total cart
-        $item->cart->total = $item->cart->items->sum(fn($i) => $i->quantity * $i->price);
-        $item->cart->save();
-
-        return response()->json($item);
+        return response()->json(['message' => 'Cart updated'], 200);
     }
 
     /**
-     * Hapus item dari cart (protected).
+     * Hapus item dari cart
      */
     public function destroy($id)
     {
-        $user = Auth::user();
-        $item = CartItem::where('id', $id)
-                        ->whereHas('cart', fn($q) => $q->where('user_id', $user->id))
-                        ->firstOrFail();
+        $item = CartItem::find($id);
+        
+        if ($item) {
+            $item->delete();
+            return response()->json(['message' => 'Item removed'], 200);
+        }
 
-        $item->delete();
-
-        // Update total cart
-        $item->cart->total = $item->cart->items->sum(fn($i) => $i->quantity * $i->price);
-        $item->cart->save();
-
-        return response()->json(['message' => 'Item dihapus']);
+        return response()->json(['message' => 'Item not found'], 404);
     }
 
     /**
-     * Kosongkan cart (protected).
+     * Kosongkan cart
      */
     public function clear()
     {
         $user = Auth::user();
-        $cart = Cart::active($user->id);
+        $cart = Cart::where('user_id', $user->id)->where('status', 'active')->first();
 
         if ($cart) {
-            $cart->items()->delete();  // Hapus semua items
-            $cart->total = 0;
-            $cart->save();
+            $cart->items()->delete();
         }
 
-        return response()->json(['message' => 'Cart dikosongkan']);
+        return response()->json(['message' => 'Cart cleared'], 200);
     }
 }

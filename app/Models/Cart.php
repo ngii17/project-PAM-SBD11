@@ -31,9 +31,10 @@ class Cart extends Model
         return $this->hasMany(CartItem::class);
     }
 
-    // Scope untuk cart aktif user
+    // --- PERBAIKAN DI SINI ---
+    // Scope hanya filter query, jangan langsung ->first()
     public function scopeActive($query, $userId)
     {
-        return $query->where('user_id', $userId)->where('status', 'active')->first();
+        return $query->where('user_id', $userId)->where('status', 'active');
     }
 }
