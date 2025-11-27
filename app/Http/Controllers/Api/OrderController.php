@@ -1,86 +1,91 @@
 <?php
+
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderDetail;
+use App\Models\Cart; 
+use App\Models\CartItem; // Tambah import ini untuk relasi items
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Auth; // Untuk user login
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class OrderController extends Controller {
-    // Buat order baru (user pesan)
-    public function store(Request $request) {
-        $validator = Validator::make($request->all(), [
-            'details' => 'required|array|min:1',
-            'details.*.product_id' => 'required|exists:products,id',
-            'details.*.qty' => 'required|integer|min:1',
-            'metode_pembayaran' => 'required|string',
-            'alamat_pengiriman' => 'required|string',
-            'catatan' => 'nullable|string',
-        ]);
+    
+public function store(Request $request) {
+    $validator = Validator::make($request->all(), [
+        'nama_penerima'     => 'required|string',
+        'no_hp_penerima'    => 'required|string',
+        'alamat_pengiriman' => 'required|string',
+        'tanggal_pengiriman'=> 'required|date',
+        'ucapan_kartu'      => 'nullable|string',
+        'items'             => 'required|array|min:1',
+        'items.*.product_id'=> 'required|integer',
+        'items.*.quantity'  => 'required|integer|min:1',
+        'items.*.price'     => 'required|numeric',
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()], 422);
-        }
+    if ($validator->fails()) {
+        return response()->json(['message' => 'Data tidak lengkap', 'errors' => $validator->errors()], 422);
+    }
 
-        $userId = Auth::id(); // ID user login
-        $totalHarga = 0;
+    $user = Auth::user();
+    $items = $request->items;
 
-        // Hitung total dari details
-        foreach ($request->details as $detail) {
-            $product = \App\Models\Product::find($detail['product_id']);
-            $subtotal = $product->harga * $detail['qty'];
-            $totalHarga += $subtotal;
-        }
+    try {
+        DB::beginTransaction();
 
-        // Buat order
+        $totalHarga = collect($items)->sum(fn($i) => $i['price'] * $i['quantity']);
+
+        $noInvoice = 'INV-' . date('YmdHis');
+
         $order = Order::create([
-            'user_id' => $userId,
-            'total_harga' => $totalHarga,
-            'metode_pembayaran' => $request->metode_pembayaran,
-            'status_pesanan' => 'pending',
+            'user_id'           => $user->id,
+            'no_invoice'        => $noInvoice,
+            'nama_penerima'     => $request->nama_penerima,
+            'no_hp_penerima'    => $request->no_hp_penerima,
             'alamat_pengiriman' => $request->alamat_pengiriman,
-            'catatan' => $request->catatan,
+            'tanggal_pengiriman'=> $request->tanggal_pengiriman,
+            'ucapan_kartu'      => $request->ucapan_kartu,
+            'total_price'       => $totalHarga,
+            'status'            => 'pending',
         ]);
 
-        // Buat details
-        foreach ($request->details as $detail) {
-            $product = \App\Models\Product::find($detail['product_id']);
+        foreach ($items as $item) {
             OrderDetail::create([
-                'order_id' => $order->id,
-                'product_id' => $detail['product_id'],
-                'qty' => $detail['qty'],
-                'harga_satuan' => $product->harga,
-                'subtotal' => $product->harga * $detail['qty']
+                'order_id'    => $order->id,
+                'product_id'  => $item['product_id'],
+                'qty'         => $item['quantity'],
+                'harga_satuan'=> $item['price'],     // INI YANG HARUSNYA!
+                'subtotal'    => $item['price'] * $item['quantity'],
             ]);
         }
 
-        return response()->json(['order' => $order->load('details.product')], 201); // Return order dengan details
-    }
+        // Kosongkan cart
+        $cart = Cart::active($user->id)->first();
+        if ($cart) $cart->items()->delete();
 
-    // Lihat semua orders user
-    public function index() {
-        $orders = Order::with('details.product')->where('user_id', Auth::id())->get();
-        return response()->json($orders);
-    }
+        DB::commit();
 
-    // Lihat rincian order spesifik
-    public function show($id) {
-        $order = Order::with('details.product')->findOrFail($id);
-        if ($order->user_id != Auth::id()) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-        return response()->json($order);
-    }
+        $waUrl = "https://wa.me/6281280163853?text=" . urlencode(
+            "Pesanan Baru!\n\n" .
+            "Invoice: $noInvoice\n" .
+            "Penerima: {$request->nama_penerima}\n" .
+            "Total: Rp " . number_format($totalHarga, 0, ',', '.') . "\n\n" .
+            "Mohon proses ya kak!"
+        );
 
-    // Update status (misal user konfirmasi)
-    public function updateStatus(Request $request, $id) {
-        $order = Order::findOrFail($id);
-        if ($order->user_id != Auth::id()) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-        $order->update(['status_pesanan' => $request->status_pesanan]);
-        return response()->json($order);
+        return response()->json([
+            'message' => 'Checkout berhasil',
+            'payment_url' => $waUrl
+        ], 200);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json(['message' => 'Gagal checkout: ' . $e->getMessage()], 500);
     }
+}    
+    // ... Function index, show dll biarkan di bawah sini ...
 }

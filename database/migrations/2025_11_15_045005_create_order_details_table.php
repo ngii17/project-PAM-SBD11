@@ -7,11 +7,19 @@ return new class extends Migration {
     public function up() {
         Schema::create('order_details', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('order_id')->constrained('orders')->onDelete('cascade'); // FK ke orders
-            $table->foreignId('product_id')->constrained('products')->onDelete('cascade'); // FK ke products (inventaris)
-            $table->integer('qty');
-            $table->decimal('harga_satuan', 10, 2);
-            $table->decimal('subtotal', 10, 2);
+            
+            // Relasi ke tabel orders (Wajib ada)
+            $table->foreignId('order_id')->constrained('orders')->onDelete('cascade');
+            
+            // Relasi ke produk (Wajib ada)
+            $table->foreignId('product_id')->constrained('products')->onDelete('cascade'); 
+            
+            $table->integer('qty'); // Jumlah barang
+            
+            // Kita ubah jadi 12,2 biar sama kayak tabel orders
+            $table->decimal('harga_satuan', 12, 2); 
+            $table->decimal('subtotal', 12, 2); // qty * harga_satuan
+            
             $table->timestamps();
         });
     }

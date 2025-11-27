@@ -37,4 +37,16 @@ class Cart extends Model
     {
         return $query->where('user_id', $userId)->where('status', 'active');
     }
+
+    // Helper: Load items + product sekaligus (biar gak N+1 query, dan hindari error relasi undefined)
+    public function getItemsWithProductAttribute()
+    {
+        return $this->items()->with('product')->get();
+    }
+
+    // Relasi langsung ke products via items (optional, kalau controller pake $cart->products)
+    public function products()
+    {
+        return $this->belongsToMany(Product::class, 'cart_items')->withPivot('quantity', 'price');
+    }
 }
