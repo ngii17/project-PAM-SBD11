@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\Category;  // Import untuk relasi category
 use App\Models\User;     // Import untuk relasi audit
+use App\Models\CartItem; // Import untuk relasi cartItems
 
 class Product extends Model
 {
@@ -60,6 +61,12 @@ class Product extends Model
         return $this->belongsTo(User::class, 'updated_by');
     }
 
+    // Relasi balik: Product hasMany CartItem (untuk lengkapi relasi cart)
+    public function cartItems()
+    {
+        return $this->hasMany(CartItem::class);
+    }
+
     // Scope untuk filter/search (dipakai di controller)
     public function scopeByCategoryId($query, $categoryId)
     {
@@ -76,10 +83,5 @@ class Product extends Model
     public function getAverageRatingAttribute()
     {
         return $this->reviews()->avg('rating') ?? 0;
-    }
-    // Tambah di relasi existing
-    public function cartItems()
-    {
-        return $this->hasMany(CartItem::class);
     }
 }
