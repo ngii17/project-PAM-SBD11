@@ -5,15 +5,21 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CartController;
-use App\Http\Controllers\Api\OrderController; // Pastikan ini OrderController
+use App\Http\Controllers\Api\OrderController;
+use App\Http\Controllers\Api\ReviewController;
 
-// ====================== PUBLIC ROUTES ======================
+// ====================== PUBLIC ROUTES (BISA DIAKSES TANPA LOGIN) ======================
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
-// Produk & Kategori (Bisa dilihat tanpa login)
+// Produk & Kategori
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
+
+// [BARU] LIHAT ULASAN PRODUK (PUBLIC)
+// Ini biar customer bisa liat review tanpa harus login dulu
+Route::get('/products/{id}/reviews', [ReviewController::class, 'index']);
+
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/categories/{id}', [CategoryController::class, 'show']);
 
@@ -22,12 +28,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/profile', [AuthController::class, 'profile']);
 
-    // --- KHUSUS CHECKOUT (INI YANG PENTING BUAT FLUTTER KAMU) ---
-    // ← TAMBAH INI SAJA UNTUK CHECKOUT! (Di dalam middleware auth kalau ada)
+    // --- CHECKOUT & TRANSAKSI ---
     Route::post('/checkout', [OrderController::class, 'store']);
 
-    // Order History & Status
-    Route::apiResource('orders', OrderController::class)->except(['store']); // store udah dipake di checkout
+    // RIWAYAT PESANAN
+    Route::get('/orders/history', [OrderController::class, 'history']); 
+
+    // KIRIM ULASAN (Hanya user login yang bisa kirim)
+    Route::post('/reviews', [ReviewController::class, 'store']);
+
+    // Order Management Lainnya
+    Route::apiResource('orders', OrderController::class)->except(['store']); 
     Route::post('orders/{id}/status', [OrderController::class, 'updateStatus']);
 
     // Keranjang (Cart)

@@ -16,7 +16,7 @@ class Order extends Model {
         'tanggal_pengiriman',  // Dari form
         'ucapan_kartu',  // Dari form (bisa null)
         'total_harga',  // Total dari cart
-        'status_pesanan',  // Default 'pending'
+        'status_pembayaran',  // Default 'pending'
         'metode_pembayaran',  // Default 'transfer' atau null
         'catatan',  // Opsional
     ];
